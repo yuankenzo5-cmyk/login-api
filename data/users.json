@@ -2,7 +2,7 @@
   {
     "id": 1,
     "username": "demo",
-    "password": "$2a$10$JHz6i0e0mIYEXAMPLEZDIhHfA2WcMn3S7vTnD7MnZFrkP/ZnWm", 
+    "password": "$2y$10$qwxnWsPbPIHilYcvhlK.X.5p5EK5lCOLJ97sFRHHAObyQyxongOqy", 
     "expired_at": "2025-12-31T00:00:00Z",
     "devices": [123],
     "device_limit": 2
