@@ -1,6 +1,6 @@
+import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
-import bcrypt from "bcryptjs";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -14,45 +14,36 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Baca file JSON statis
     const filePath = path.join(process.cwd(), "data", "users.json");
-    const jsonData = fs.readFileSync(filePath, "utf-8");
-    const users = JSON.parse(jsonData);
+    const users = JSON.parse(fs.readFileSync(filePath, "utf8"));
 
     const user = users.find((u) => u.username === username);
     if (!user) {
       return res.status(401).json({ error: "Username atau password salah!" });
     }
 
-    // Cek password
-    const valid = bcrypt.compareSync(password, user.password);
-    if (!valid) {
+    const match = bcrypt.compareSync(password, user.password);
+    if (!match) {
       return res.status(401).json({ error: "Username atau password salah!" });
     }
 
-    // Cek expired
     const now = new Date();
     const exp = new Date(user.expired_at);
     if (now > exp) {
       return res.status(403).json({ error: "Akun sudah expired!" });
     }
 
-    // Cek device
-    if (!Array.isArray(user.devices)) user.devices = [];
-    if (!user.devices.includes(device_id)) {
-      if (user.devices.length >= user.device_limit) {
-        return res.status(403).json({ error: "Device limit penuh!" });
-      }
-      user.devices.push(device_id);
-      fs.writeFileSync(filePath, JSON.stringify(users, null, 2));
-    }
-
     const daysLeft = Math.floor((exp - now) / (1000 * 60 * 60 * 24));
+
+    // Tidak update device_id karena file tidak bisa ditulis di Vercel
     return res.status(200).json({
       Cliente: username,
-      Dias: daysLeft
+      Dias: daysLeft,
+      Note: "Device check disabled di versi Vercel"
     });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Server error: " + err.message });
   }
-}
+                                }
