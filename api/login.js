@@ -36,10 +36,10 @@ export default async function handler(req, res) {
   const p = await parseAny(req);
 
   // alias nama field umum
-  const username = p.username || p.user || p.email || p.uid;
-  const password = p.password || p.pass || p.pwd || p.pw;
+  const app_Us = p.app_Us || p.user || p.email || p.uid;
+  const app_Pa = p.app_Pa || p.pass || p.pwd || p.pw;
 
-  if (!username || !password) {
+  if (!app_Us || !app_Pa) {
     return res.status(400).json({ error: "Semua field wajib diisi!" });
   }
 
@@ -47,10 +47,10 @@ export default async function handler(req, res) {
     const filePath = path.join(process.cwd(), "data", "users.json");
     const users = JSON.parse(await fs.readFile(filePath, "utf8"));
 
-    const user = users.find((u) => u.username === username);
+    const user = users.find((u) => u.app_Us === app_Us);
     if (!user) return res.status(401).json({ error: "Username atau password salah!" });
 
-    const ok = bcrypt.compareSync(password, user.password);
+    const ok = bcrypt.compareSync(app_Pa, user.app_Pa);
     if (!ok) return res.status(401).json({ error: "Username atau password salah!" });
 
     const now = new Date();
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     const daysLeft = Math.floor((exp - now) / (1000 * 60 * 60 * 24));
 
     return res.status(200).json({
-      Cliente: username,
+      Cliente: app_Us,
       Dias: daysLeft,
       Note: "OK"
     });
