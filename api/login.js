@@ -1,33 +1,32 @@
-// /api/login.js (mode proxy)
+// api/vip/loginbrmods.js
+import crypto from "crypto";
+
 export const config = { api: { bodyParser: false } };
 
-export default async function handler(req, res) {
-  const TARGET = "https://brmods.net/mod/loginMod.php?gdfasdgertdfswsdf=v1"; // ganti sesuai oldhostmu
-  try {
-    let body = null;
-    if (req.method !== "GET") {
-      const chunks = []; for await (const c of req) chunks.push(c);
-      body = Buffer.concat(chunks);
-    }
-    const url = new URL(TARGET);
-    // kalau aslinya GET + query, gabungkan:
-    if (req.method === "GET") {
-      const q = new URL(req.url, "https://x").search; // query dari klien
-      if (q) url.search = (url.search ? url.search + "&" : "?") + q.slice(1);
-    }
-    const up = await fetch(url, {
-      method: req.method,
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Accept-Encoding": "identity",
-        "Content-Type": req.headers["content-type"] || "application/x-www-form-urlencoded",
-      },
-      body: req.method === "GET" ? undefined : body
-    });
-    const text = await up.text();
-    res.status(up.status).setHeader("Content-Type", up.headers.get("content-type") || "text/plain").send(text);
-  } catch (e) {
-    res.status(500).send("ERR: " + e.message);
-  }
-  }
+async function parseAny(req){
+  const ct=(req.headers["content-type"]||"").toLowerCase();
+  if(req.method==="GET") return Object.fromEntries(new URL(req.url,"https://x").searchParams);
+  let raw=""; for await (const c of req) raw+=c;
+  if(ct.includes("application/json")||raw.trim().startsWith("{")){ try{return JSON.parse(raw||"{}");}catch{} }
+  if(ct.includes("application/x-www-form-urlencoded")||raw.includes("=")){ try{return Object.fromEntries(new URLSearchParams(raw));}catch{} }
+  return {};
+}
+
+export default async function handler(req,res){
+  const p = await parseAny(req);
+  // APK-mu kirim form "token=...". Kita terima tapi tidak validasi ketat.
+  const token = (p.token || p.auth || p.t || "").toString();
+
+  // Buat payload mirip oldhost: {Data, Sign, Hash}
+  // Data: string base64; Sign: HMAC-SHA256(base64 Data); Hash: SHA256(base64 Data) HEX UPPERCASE
+  const dataB64 = Buffer.from(crypto.randomBytes(64)).toString("base64");
+  const signB64 = crypto.createHmac("sha256", process.env.SIGN_SECRET || "secret")
+                        .update(dataB64).digest("base64");
+  const hashHex = crypto.createHash("sha256").update(dataB64).digest("hex").toUpperCase();
+
+  const payload = { Data: dataB64, Sign: signB64, Hash: hashHex };
+  const toSend = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+
+  // Oldhost mengirim sebagai text/plain
+  res.status(200).setHeader("Content-Type","text/plain; charset=utf-8").send(toSend);
+}
