@@ -1,7 +1,7 @@
 [
   {
-    "username": "demo",
-    "password": "$2y$10$qwxnWsPbPIHilYcvhlK.X.5p5EK5lCOLJ97sFRHHAObyQyxongOqy",
+    "app_Us": "demo",
+    "app_Pa": "$2y$10$qwxnWsPbPIHilYcvhlK.X.5p5EK5lCOLJ97sFRHHAObyQyxongOqy",
     "expired_at": "2026-12-31T23:59:59.000Z"
   }
 ]
