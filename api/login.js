@@ -1,31 +1,31 @@
-// /api/login.js  (Next.js pages API / Node on Vercel)
+// /api/login.js
 import bcrypt from "bcryptjs";
 import { promises as fs } from "fs";
 import path from "path";
 
-export const config = { api: { bodyParser: false } }; // biar kita parse sendiri
+export const config = { api: { bodyParser: false } };
 
+// --- parser fleksibel -------------------------------------------------------
 async function parseAny(req) {
   const ct = (req.headers["content-type"] || "").toLowerCase();
-  if (req.method === "GET") return { ...req.query, _ct: ct, _raw: "" };
 
-  // kumpulkan body mentah
+  if (req.method === "GET") {
+    return { params: { ...req.query }, ct, raw: "" };
+  }
+
   let raw = "";
   for await (const c of req) raw += c;
 
   // 1) JSON
-  if (ct.includes("application/json")) {
-    try { return { ...(JSON.parse(raw || "{}")), _ct: ct, _raw: raw }; } catch {}
+  if (ct.includes("application/json") || raw.trim().startsWith("{")) {
+    try { return { params: JSON.parse(raw || "{}"), ct, raw }; } catch {}
   }
   // 2) x-www-form-urlencoded
-  if (ct.includes("application/x-www-form-urlencoded")) {
-    return { ...Object.fromEntries(new URLSearchParams(raw)), _ct: ct, _raw: raw };
+  if (ct.includes("application/x-www-form-urlencoded") || raw.includes("=")) {
+    try { return { params: Object.fromEntries(new URLSearchParams(raw)), ct, raw }; } catch {}
   }
-  // 3) text/plain / unknown → coba keduanya
-  try { return { ...(JSON.parse(raw || "{}")), _ct: ct, _raw: raw }; } catch {}
-  try { return { ...Object.fromEntries(new URLSearchParams(raw)), _ct: ct, _raw: raw }; } catch {}
-
-  return { _ct: ct, _raw: raw }; // kosong jika gagal
+  // 3) fallback kosong
+  return { params: {}, ct, raw };
 }
 
 function pick(params, aliases) {
@@ -35,22 +35,32 @@ function pick(params, aliases) {
   return "";
 }
 
+// --- handler ----------------------------------------------------------------
 export default async function handler(req, res) {
   if (req.method !== "POST" && req.method !== "GET")
     return res.status(405).json({ error: "Method Not Allowed" });
 
-  const p = await parseAny(req);
+  const { params, ct, raw } = await parseAny(req);
 
-  // alias sangat longgar
-  const username = pick(p, ["username","user","usr","u","email","uid","login","account"]);
-  const password = pick(p, ["password","pass","pwd","pw","p"]);
+  const username = pick(params, ["username","user","usr","u","email","uid","login","account"]);
+  const password = pick(params, ["password","pass","pwd","pw","p"]);
 
+  // DEBUG MODE: kalau belum ketemu field, balas 200 dan tampilkan apa yang diterima
   if (!username || !password) {
-    // log agar kamu bisa lihat apa yg APK kirim di Function Logs
-    console.log("[login] BAD FIELDS", { headers: req.headers, parsed: p });
-    return res.status(400).json({ error: "Semua field wajib diisi!" });
+    return res.status(200).json({
+      debug: true,
+      note: "Field belum ditemukan. Kirimkan respons ini ke saya—akan saya mappingkan.",
+      seen: {
+        method: req.method,
+        contentType: ct,
+        keys: Object.keys(params || []),
+        params,
+        raw // mungkin panjang; ini yang paling penting
+      }
+    });
   }
 
+  // ====== NORMAL FLOW (sama seperti sebelumnya, tanpa device_id) ======
   try {
     const filePath = path.join(process.cwd(), "data", "users.json");
     const users = JSON.parse(await fs.readFile(filePath, "utf8"));
