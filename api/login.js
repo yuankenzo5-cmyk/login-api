@@ -29,7 +29,7 @@ export default async function handler(req, res) {
 
   if (username === validUser && password === validPass) {
     // Cek file loader.zip di root project
-    const filePath = path.join(process.cwd(), "public", "loader.zip");
+    const loaderpath = path.join(process.cwd(), "public", "loader.zip");
     let loaderBase64 = "";
     if (fs.existsSync(loaderPath)) {
       loaderBase64 = fs.readFileSync(loaderPath).toString("base64");
