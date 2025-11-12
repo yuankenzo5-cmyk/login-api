@@ -38,6 +38,12 @@ function parseBodyGuess(req) {
   return null;
 }
 
+export const config = {
+  api: {
+    bodyParser: false, // supaya bisa baca body manual
+  },
+};
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -48,25 +54,31 @@ export default async function handler(req, res) {
       }, 405);
     }
 
-    // parse body (supports JSON or application/x-www-form-urlencoded)
-    let body = parseBodyGuess(req);
-    // sometimes Vercel provides body as object already; parseBodyGuess handles that
-    if (!body) {
-      // as fallback, try to read raw body (some setups)
-      try {
-        const raw = await new Promise((resolve, reject) => {
-          let data = "";
-          req.on("data", chunk => data += chunk);
-          req.on("end", () => resolve(data));
-          req.on("error", reject);
-        });
-        body = parseBodyGuess({ body: raw }) || {};
-      } catch (e) {
-        body = {};
-      }
+    // 🔹 BACA RAW BODY MANUAL
+    const raw = await new Promise((resolve, reject) => {
+      let data = "";
+      req.on("data", chunk => (data += chunk));
+      req.on("end", () => resolve(data));
+      req.on("error", reject);
+    });
+
+    // 🔹 LOG DI SINI
+    console.log("RAW BODY:", raw);
+
+    // 🔹 COBA PARSE KE JSON ATAU FORM
+    let body;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      const p = new URLSearchParams(raw);
+      body = {};
+      for (const [k, v] of p.entries()) body[k] = v;
     }
 
-    if (!body || !body.username || !body.password) {
+    // 🔹 LOG SETELAH PARSE
+    console.log("PARSED BODY:", body);
+
+    if (!body.username || !body.password) {
       return sendBase64(res, {
         Status: "Failed",
         Message: "Invalid JSON body",
@@ -74,6 +86,7 @@ export default async function handler(req, res) {
       }, 400);
     }
 
+    // ... lanjutkan proses login, validasi, dll.
     const { username, password } = body;
 
     // valid credentials (ubah sesuai kebutuhan)
