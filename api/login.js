@@ -1,32 +1,36 @@
-// api/vip/loginbrmods.js
-import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
-export const config = { api: { bodyParser: false } };
+export default function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-async function parseAny(req){
-  const ct=(req.headers["content-type"]||"").toLowerCase();
-  if(req.method==="GET") return Object.fromEntries(new URL(req.url,"https://x").searchParams);
-  let raw=""; for await (const c of req) raw+=c;
-  if(ct.includes("application/json")||raw.trim().startsWith("{")){ try{return JSON.parse(raw||"{}");}catch{} }
-  if(ct.includes("application/x-www-form-urlencoded")||raw.includes("=")){ try{return Object.fromEntries(new URLSearchParams(raw));}catch{} }
-  return {};
-}
+  const { username, password } = req.body;
 
-export default async function handler(req,res){
-  const p = await parseAny(req);
-  // APK-mu kirim form "token=...". Kita terima tapi tidak validasi ketat.
-  const token = (p.token || p.auth || p.t || "").toString();
+  // verifikasi login
+  if (username === "brmod" && password === "123") {
+    // ambil loader.zip dari folder yang sama
+    const filePath = path.join(process.cwd(), "api", "loader.zip");
+    const fileData = fs.readFileSync(filePath);
+    const loaderBase64 = fileData.toString("base64");
 
-  // Buat payload mirip oldhost: {Data, Sign, Hash}
-  // Data: string base64; Sign: HMAC-SHA256(base64 Data); Hash: SHA256(base64 Data) HEX UPPERCASE
-  const dataB64 = Buffer.from(crypto.randomBytes(64)).toString("base64");
-  const signB64 = crypto.createHmac("sha256", process.env.SIGN_SECRET || "secret")
-                        .update(dataB64).digest("base64");
-  const hashHex = crypto.createHash("sha256").update(dataB64).digest("hex").toUpperCase();
+    const response = {
+      Status: "Success",
+      Loader: loaderBase64,
+      MessageString: {
+        Cliente: username,
+        Dias: "5"
+      },
+      CurrUser: username,
+      CurrPass: password,
+      CurrToken: "",
+      CurrVersion: "2.0",
+      SubscriptionLeft: "5"
+    };
 
-  const payload = { Data: dataB64, Sign: signB64, Hash: hashHex };
-  const toSend = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
-
-  // Oldhost mengirim sebagai text/plain
-  res.status(200).setHeader("Content-Type","text/plain; charset=utf-8").send(toSend);
-}
+    return res.status(200).json(response);
+  } else {
+    return res.status(401).json({ Status: "Failed", Message: "Invalid login" });
+  }
+      }
