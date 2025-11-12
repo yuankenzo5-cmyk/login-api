@@ -13,6 +13,21 @@ export default async function handler(req, res) {
   // Di Vercel, req.body sudah otomatis jadi objek
   const body = req.body;
 
+  let body = req.body;
+
+  // Parse manual kalau bukan JSON
+  if (typeof body === "string") {
+    try {
+      body = Object.fromEntries(new URLSearchParams(body));
+    } catch (e) {
+      return sendBase64(res, {
+        Status: "Failed",
+        Message: "Invalid form data",
+      });
+    }
+  }
+  
+
   if (!body || !body.username || !body.password) {
     return sendBase64(res, {
       Status: "Failed",
