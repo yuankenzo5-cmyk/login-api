@@ -1,43 +1,61 @@
 export default async function handler(req, res) {
+  console.log('🔥 Handler triggered');
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ status: 'Failed', message: 'Method not allowed' });
+    return res.status(405).json({ Status: 'Failed', Message: 'Method not allowed' });
   }
 
   try {
-    // 🔹 Log isi request ke Vercel (bisa dilihat di tab "Logs")
-    console.log('Headers:', req.headers);
-    console.log('Raw body:', req.body);
+    // Baca raw body
+    let rawBody = '';
+    await new Promise((resolve) => {
+      req.on('data', (chunk) => (rawBody += chunk));
+      req.on('end', resolve);
+    });
+    console.log('🧩 Raw body:', rawBody);
 
-    // Pastikan body terisi
-    if (!req.body) {
-      return res.status(400).json({ status: 'Failed', message: 'Empty body' });
+    // Parse form-urlencoded
+    const params = new URLSearchParams(rawBody);
+    const token = params.get('token');
+    if (!token) {
+      console.log('❌ No token found');
+      return res.status(400).json({ Status: 'Failed', Message: 'Token missing' });
     }
 
-    // Kalau pakai JSON body
-    let body = req.body;
-    if (typeof body === 'string') {
-      body = JSON.parse(body);
+    // Decode base64 token
+    let decodedToken;
+    try {
+      decodedToken = Buffer.from(token, 'base64').toString('utf-8');
+      console.log('🔍 Decoded token:', decodedToken);
+    } catch (e) {
+      console.error('❌ Invalid base64 token');
+      return res.status(400).json({ Status: 'Failed', Message: 'Invalid base64 token' });
     }
 
-    console.log('Parsed body:', body);
-
-    // Contoh validasi sederhana
-    if (!body.username || !body.password) {
-      return res.status(400).json({ status: 'Failed', message: 'Missing username or password' });
+    // (Opsional) parse JSON di dalam token kalau memang JSON
+    let tokenData;
+    try {
+      tokenData = JSON.parse(decodedToken);
+    } catch {
+      tokenData = { raw: decodedToken };
     }
 
-    // Kalau lolos
-    const response = {
-      Status: 'Success',
-      Message: 'Login OK',
-      SubcriptionLeft: '30',
-    };
+    console.log('✅ Parsed token data:', tokenData);
 
-    const encoded = Buffer.from(JSON.stringify(response)).toString('base64');
-    return res.status(200).send(encoded);
+    // Contoh validasi login
+    const valid = tokenData.username === 'admin' && tokenData.password === '12345';
 
+    const response = valid
+      ? { Status: 'Success', Message: 'Login OK', SubcriptionLeft: '30' }
+      : { Status: 'Failed', Message: 'Invalid credentials', SubcriptionLeft: '0' };
+
+    // Encode seluruh respons ke base64 sebelum dikirim
+    const encodedResponse = Buffer.from(JSON.stringify(response)).toString('base64');
+    console.log('🚀 Final base64 response:', encodedResponse);
+
+    res.status(200).send(encodedResponse);
   } catch (err) {
-    console.error('Error:', err);
-    return res.status(400).json({ status: 'Failed', message: 'Invalid JSON or form body' });
+    console.error('❌ Server error:', err);
+    res.status(500).json({ Status: 'Failed', Message: 'Server error' });
   }
-}
+                                  }
