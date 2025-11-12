@@ -2,28 +2,27 @@ import fs from "fs";
 import path from "path";
 
 export default async function handler(req, res) {
-  // Pastikan method POST
+  // Hanya izinkan POST
   if (req.method !== "POST") {
     return sendBase64(res, {
       Status: "Failed",
       Message: "Only POST method allowed",
-      SubscriptionLeft: "0",
     });
   }
 
-  let body = {};
-  try {
-    body = JSON.parse(req.body);
-  } catch (e) {
+  // Di Vercel, req.body sudah otomatis jadi objek
+  const body = req.body;
+
+  if (!body || !body.username || !body.password) {
     return sendBase64(res, {
       Status: "Failed",
       Message: "Invalid JSON body",
-      SubscriptionLeft: "0",
+      SubscriptionLeft: "0"
     });
   }
 
   const { username, password } = body;
-
+  
   // Kredensial yang benar
   const validUser = "brmod";
   const validPass = "123";
