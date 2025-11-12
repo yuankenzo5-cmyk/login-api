@@ -31,6 +31,8 @@ export default function handler(req, res) {
 
     return res.status(200).json(response);
   } else {
-    return res.status(401).json({ Status: "Failed", Message: "Invalid login" });
+    return res.status(401).json({ Status: "Failed",
+    MessageString: "Usuário e/ou senha incorreta!",
+    SubscriptionLeft: "0" });
   }
 }
