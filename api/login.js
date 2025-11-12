@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     return res.status(400).json({
       Status: "Failed",
     MessageString: "Usuário e/ou senha incorreta!",
-    SubscriptionLeft: "0"
+    SubscriptionLeft: "0",
     });
   }
 
@@ -39,7 +39,8 @@ export default async function handler(req, res) {
   if (username !== validUser || password !== validPass) {
     return res.status(401).json({
       Status: "Failed",
-      Message: "Invalid login",
+    MessageString: "Usuário e/ou senha incorreta!",
+    SubscriptionLeft: "0",
     });
   }
 
