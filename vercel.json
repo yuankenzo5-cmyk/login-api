@@ -6,6 +6,6 @@
   "routes": [
     { "src": "/api/login.php", "dest": "api/login.js" }
   
-    { "src": "/public/loader.zip", "dest": "/public/loader.zip" }
+    { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }
