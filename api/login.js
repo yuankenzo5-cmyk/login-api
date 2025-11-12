@@ -1,61 +1,107 @@
-export default async function handler(req, res) {
-  console.log('🔥 Handler triggered');
+// api/login.js  (Vercel Serverless - Node/JS)
+import fs from "fs";
+import path from "path";
+import querystring from "querystring";
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ Status: 'Failed', Message: 'Method not allowed' });
-  }
+/**
+ * Helper: encode response object jadi base64 (JSON string, no extra)
+ */
+function toBase64(obj) {
+  const j = JSON.stringify(obj);
+  return Buffer.from(j, "utf8").toString("base64");
+}
 
-  try {
-    // Baca raw body
-    let rawBody = '';
-    await new Promise((resolve) => {
-      req.on('data', (chunk) => (rawBody += chunk));
-      req.on('end', resolve);
-    });
-    console.log('🧩 Raw body:', rawBody);
-
-    // Parse form-urlencoded
-    const params = new URLSearchParams(rawBody);
-    const token = params.get('token');
-    if (!token) {
-      console.log('❌ No token found');
-      return res.status(400).json({ Status: 'Failed', Message: 'Token missing' });
-    }
-
-    // Decode base64 token
-    let decodedToken;
+/**
+ * Helper: read loader.zip (jika ada) dan return base64 string
+ */
+function readLoaderBase64() {
+  // coba beberapa lokasi umum: public/loader.zip atau api/loader.zip (sesuai repo mu)
+  const candidates = [
+    path.join(process.cwd(), "public", "loader.zip"),
+    path.join(process.cwd(), "api", "loader.zip"),
+    path.join(process.cwd(), "loader.zip"),
+  ];
+  for (const p of candidates) {
     try {
-      decodedToken = Buffer.from(token, 'base64').toString('utf-8');
-      console.log('🔍 Decoded token:', decodedToken);
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p).toString("base64");
+      }
     } catch (e) {
-      console.error('❌ Invalid base64 token');
-      return res.status(400).json({ Status: 'Failed', Message: 'Invalid base64 token' });
+      // ignore
     }
+  }
+  return ""; // kosong jika tidak ada
+}
 
-    // (Opsional) parse JSON di dalam token kalau memang JSON
-    let tokenData;
+export default async function handler(req, res) {
+  // hanya POST (APK biasanya POST)
+  if (req.method !== "POST") {
+    const payload = { Status: "Failed", Message: "Only POST method allowed", SubscriptionLeft: "0" };
+    return res.status(405).send(toBase64(payload));
+  }
+
+  // body parsing: Vercel sudah parse JSON otomatis IF content-type application/json
+  // APK mungkin mengirim form-urlencoded -> kita handle itu
+  let body = req.body;
+
+  // If body is a raw string from form-urlencode, parse
+  if (typeof body === "string") {
+    // contoh: "username=brmod&password=123" atau "token=...."
     try {
-      tokenData = JSON.parse(decodedToken);
-    } catch {
-      tokenData = { raw: decodedToken };
+      body = querystring.parse(body);
+    } catch (e) {
+      body = {};
     }
-
-    console.log('✅ Parsed token data:', tokenData);
-
-    // Contoh validasi login
-    const valid = tokenData.username === 'admin' && tokenData.password === '12345';
-
-    const response = valid
-      ? { Status: 'Success', Message: 'Login OK', SubcriptionLeft: '30' }
-      : { Status: 'Failed', Message: 'Invalid credentials', SubcriptionLeft: '0' };
-
-    // Encode seluruh respons ke base64 sebelum dikirim
-    const encodedResponse = Buffer.from(JSON.stringify(response)).toString('base64');
-    console.log('🚀 Final base64 response:', encodedResponse);
-
-    res.status(200).send(encodedResponse);
-  } catch (err) {
-    console.error('❌ Server error:', err);
-    res.status(500).json({ Status: 'Failed', Message: 'Server error' });
   }
+
+  // Some APKs send x-www-form-urlencoded but Vercel gives object already; OK.
+  // Also accept field "token" directly: apk sometimes sends token=BASE64STRING
+  const username = (body.username || body.user || "").toString();
+  const password = (body.password || body.pass || "").toString();
+  const token = body.token || "";
+
+  // Kredensial yang benar (sampel)
+  const validUser = "brmod";
+  const validPass = "123";
+
+  // baca loader.zip jika ada (base64)
+  const loaderBase64 = readLoaderBase64();
+
+  // Response jika valid
+  if ((username === validUser && password === validPass) || token) {
+    // Jika token dikirim dari apk, kamu bisa juga memvalidasi token di sini.
+    const responseObj = {
+      Data: "Sm9obkRvZVZhbGluZz0=", // contoh field Data (bisa kamu ubah)
+      Sign: "U0...=",              // contoh Sign
+      Hash: "A10791D45981C1DF8F2B93B...", // contoh Hash
+      Status: "Success",
+      Loader: loaderBase64,       // jika ada loader.zip -> base64 string, kalau kosong -> ""
+      MessageString: {
+        Cliente: username || "brmod",
+        Dias: "5",
+      },
+      CurrUser: username || "brmod",
+      CurrPass: password || "123",
+      CurrToken: token || "",
+      CurrVersion: "2.0",
+      SubscriptionLeft: "5",
+    };
+
+    const out = toBase64(responseObj);
+    // log untuk debugging (akan muncul di Vercel Logs)
+    console.log("[login] success, returning base64 len=", out.length);
+    res.setHeader("Content-Type", "text/plain");
+    return res.status(200).send(out);
   }
+
+  // Jika login gagal -> masih base64
+  const failObj = {
+    Status: "Failed",
+    Message: "Invalid login or form body",
+    SubscriptionLeft: "0",
+  };
+  const outFail = toBase64(failObj);
+  console.log("[login] failed, returning base64 len=", outFail.length);
+  res.setHeader("Content-Type", "text/plain");
+  return res.status(200).send(outFail);
+}
