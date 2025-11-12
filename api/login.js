@@ -27,8 +27,7 @@ export default async function handler(req, res) {
   if (!username || !password) {
     return res.status(400).json({
       Status: "Failed",
-    MessageString: "Usuário e/ou senha incorreta!",
-    SubscriptionLeft: "0",
+      Message:"Missing credentials",
     });
   }
 
