@@ -1,11 +1,12 @@
 export const config = {
-  runtime: "nodejs",
+  runtime: "nodejs", // pastikan pakai Node.js runtime, bukan Edge
 };
+
 import fs from "fs";
 import path from "path";
 
 export default async function handler(req, res) {
-  // Hanya izinkan POST
+  // Pastikan POST
   if (req.method !== "POST") {
     return sendBase64(res, {
       Status: "Failed",
@@ -13,50 +14,44 @@ export default async function handler(req, res) {
     });
   }
 
-  // Di Vercel, req.body sudah otomatis jadi objek
-  const body = req.body;
-
+  // Parsing body agar mendukung JSON dan x-www-form-urlencoded
   let body = req.body;
-
-  // Parse manual kalau bukan JSON
   if (typeof body === "string") {
     try {
       body = Object.fromEntries(new URLSearchParams(body));
-    } catch (e) {
-      return sendBase64(res, {
-        Status: "Failed",
-        Message: "Invalid form data",
-      });
+    } catch (err) {
+      body = {};
     }
   }
-  
 
-  if (!body || !body.username || !body.password) {
+  const username = body?.username;
+  const password = body?.password;
+
+  if (!username || !password) {
     return sendBase64(res, {
       Status: "Failed",
-      Message: "Invalid JSON body",
-      SubscriptionLeft: "0"
+      Message: "Invalid JSON or form body",
+      SubscriptionLeft: "0",
     });
   }
 
-  const { username, password } = body;
-  
-  // Kredensial yang benar
+  // Kredensial benar
   const validUser = "brmod";
   const validPass = "123";
 
   if (username === validUser && password === validPass) {
-    // Cek file loader.zip di root project
-    const loaderpath = path.join(process.cwd(), "api", "nigga.zip");
+    // Path file loader (ubah sesuai lokasi kamu)
+    const loaderPath = path.join(process.cwd(), "api", "nigga.zip");
+
     let loaderBase64 = "";
     if (fs.existsSync(loaderPath)) {
       loaderBase64 = fs.readFileSync(loaderPath).toString("base64");
     }
 
     const response = {
-      Data: "Sm9obkRvZVZhbGlkQ29kZQ==",
-      Sign: "U0lHTl9IRVJFX0VYQU1QTEU=",
-      Hash: "A10791D45981C1DF8F2B93B5C287770AA77FF1D4F83760737A9BE00E9C89027D",
+      Data: "Sm9obkRvZXY=",
+      Sign: "U0lHTlRPS0VORE8=",
+      Hash: "QTIwMTk0NTk4MQ==",
       Status: "Success",
       Loader: loaderBase64,
     };
@@ -64,7 +59,7 @@ export default async function handler(req, res) {
     return sendBase64(res, response);
   }
 
-  // Jika login salah
+  // Jika gagal login
   return sendBase64(res, {
     Status: "Failed",
     MessageString: "Usuário e/ou senha incorreta!",
@@ -72,10 +67,7 @@ export default async function handler(req, res) {
   });
 }
 
-// Fungsi bantu untuk kirim Base64
-function sendBase64(res, data) {
-  const json = JSON.stringify(data);
-  const base64 = Buffer.from(json).toString("base64");
-  res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.status(200).send(base64);
-      }
+function sendBase64(res, obj) {
+  const encoded = Buffer.from(JSON.stringify(obj)).toString("base64");
+  res.status(200).send(encoded);
+    }
