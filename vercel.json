@@ -1,12 +1,19 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/login.js", "use": "@vercel/node" }
-    { "src": "public/**", "use": "@vercel/static" }
+    {
+      "src": "api/login.js",
+      "use": "@vercel/node"
+    }
   ],
   "routes": [
-    { "src": "/api/login.php", "dest": "api/login.js" }
-  
-    { "src": "/(.*)", "dest": "/public/$1" }
+    {
+      "src": "/api/login",
+      "dest": "api/login.js"
+    },
+    {
+      "src": "/loader.zip",
+      "dest": "/public/loader.zip"
+    }
   ]
 }
