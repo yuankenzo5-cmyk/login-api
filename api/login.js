@@ -1,138 +1,122 @@
-// api/login.js
-import fs from "fs";
-import path from "path";
+// api/loginbrmods.js  (Node 18+ / Vercel serverless)
+import { json } from 'body-parser';
+import fs from 'fs';
 
-/**
- * Utility: stringify -> base64
- */
-function toBase64(obj) {
-  const s = JSON.stringify(obj);
-  return Buffer.from(s, "utf8").toString("base64");
+export const config = { api: { bodyParser: false } };
+
+async function readBody(req) {
+  return new Promise((res, rej) => {
+    let data = '';
+    req.on('data', c => data += c);
+    req.on('end', () => res(data));
+    req.on('error', e => rej(e));
+  });
 }
 
-/**
- * Try parse form-urlencoded raw string -> object
- */
-function parseFormString(raw) {
-  try {
-    // some clients may send JSON string even with urlencoded content-type
-    if (raw.trim().startsWith("{")) {
-      return JSON.parse(raw);
-    }
-    const p = new URLSearchParams(raw);
-    return Object.fromEntries(p.entries());
-  } catch (e) {
-    return null;
+function xorDecode(decodedStr, key) {
+  if (!key) return decodedStr;
+  let out = [];
+  for (let i = 0; i < decodedStr.length; i++) {
+    const a = decodedStr.charCodeAt(i);
+    const b = key.charCodeAt(i % key.length);
+    out.push(String.fromCharCode(a ^ b));
   }
+  return out.join('');
 }
 
-/**
- * Main handler
- */
+function makeResponse(status, msg, extra = {}) {
+  return { Status: status, MessageString: msg, ...extra };
+}
+
+// simple file-based user store (not for prod)
+const USER_DB = '/tmp/brmods_users.json';
+function loadUsers() {
+  try { return JSON.parse(fs.readFileSync(USER_DB,'utf8')); } catch(e){ return {}; }
+}
+function saveUsers(u){ fs.writeFileSync(USER_DB, JSON.stringify(u, null, 2)); }
+
 export default async function handler(req, res) {
-  console.log("=== /api/login invoked ===");
-  console.log("method:", req.method);
-  console.log("headers:", req.headers ? Object.keys(req.headers).slice(0,20) : "no-headers");
+  // allow GET health-check
+  if (req.method === 'GET') return res.status(200).send('OK');
 
-  // collect inputs from query + body (support several shapes)
-  let input = {};
-
-  // 1) query string always accepted
-  if (req.query && Object.keys(req.query).length) {
-    console.log("query:", req.query);
-    input = { ...input, ...req.query };
+  const raw = await readBody(req);
+  // try parse JSON body (APK maybe sends JSON or form)
+  let body;
+  try { body = JSON.parse(raw); } catch(e){
+    // try urlencoded parse if necessary
+    const m = raw.match(/^\s*Data=([^&]*)&Sign=([^&]*)/i);
+    if (m) body = { Data: decodeURIComponent(m[1]), Sign: decodeURIComponent(m[2]) };
   }
 
-  // 2) body handling: Vercel often auto-parses JSON into req.body object.
-  let rawBody = req.body;
-
-  // If body is a string (form-urlencoded), try parse it
-  if (typeof rawBody === "string") {
-    console.log("raw body string (first200):", rawBody.slice(0, 200));
-    const parsed = parseFormString(rawBody);
-    if (parsed) rawBody = parsed;
+  if (!body || !body.Data || !body.Sign) {
+    return res.status(400).json(makeResponse('Failed', 'Missing Data/Sign'));
   }
 
-  // If body is Buffer (rare), convert to string then parse
-  if (rawBody && typeof rawBody !== "object" && rawBody.toString) {
-    try {
-      const s = rawBody.toString();
-      const parsed = parseFormString(s);
-      if (parsed) rawBody = parsed;
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  if (rawBody && typeof rawBody === "object") {
-    console.log("parsed body keys:", Object.keys(rawBody).slice(0,20));
-    input = { ...input, ...rawBody };
-  } else {
-    console.log("no parseable body");
-  }
-
-  // common fields fallback names (app may send different param names)
-  const username = (input.username || input.user || input.app_Us || "").toString();
-  const password = (input.password || input.pass || input.app_Pa || "").toString();
-  const uid = (input.uid || input.app_ID || "").toString();
-  const token6 = (input.token6 || input.token || "").toString();
-  console.log("effective fields:", { username, password, uid, token6 });
-
-  // Try load loader.zip (if you placed it in public/ or api/ or project root)
-  let loaderB64 = "";
+  // Step 1. base64-decode Data
+  let bin;
   try {
-    const candidates = [
-      path.join(process.cwd(), "public", "loader.zip"),
-      path.join(process.cwd(), "api", "loader.zip"),
-      path.join(process.cwd(), "loader.zip"),
-    ];
-    for (const p of candidates) {
-      if (fs.existsSync(p)) {
-        console.log("Found loader at:", p);
-        loaderB64 = fs.readFileSync(p).toString("base64");
-        break;
-      }
-    }
-    if (!loaderB64) console.log("loader.zip not found in candidates.");
-  } catch (e) {
-    console.error("loader read error:", e && e.message);
+    bin = Buffer.from(body.Data, 'base64').toString('utf8'); // matches fromBase64String -> String
+  } catch(e){
+    return res.status(400).json(makeResponse('Failed', 'Invalid base64'));
   }
 
-  // VALID credentials (ganti sesuai kebutuhan)
-  const VALID_USER = "brmod";
-  const VALID_PASS = "123";
+  // Step 2. XOR with Sign key (same as app)
+  const key = body.Sign;
+  const dec = xorDecode(bin, key);
 
-  // Response structure for success - tailor fields below to match app expectations
-  if (username === VALID_USER && password === VALID_PASS) {
-    const responseObj = {
-      // Data biasanya berisi base64 string (app-specific). Ganti sesuai yang diperlukan.
-      Data: "Sm9obkRvZVZh...REPLACE_WITH_REAL_BASE64_IF_NEEDED==",
-      Sign: "U0lHTkFSRU5BTkQ=",   // contoh
-      Hash: "A1079D45981C1DF8F2B93B5C287770AA77FF1D4F83760737A9BE00", // contoh
-      Status: "Success",
-      Loader: loaderB64, // jika kosong, client harus handle
-      MessageString: { Cliente: username, Dias: "5" },
-      CurrUser: username,
-      CurrPass: password,
-      CurrToken: token6 || "",
-      CurrVersion: "2.0",
-      SubscriptionLeft: "5"
-    };
+  // save full decoded for debug (careful with sensitive data)
+  try { fs.writeFileSync('/tmp/profile_full.json', dec, 'utf8'); } catch(e){}
 
-    const out = toBase64(responseObj);
-    console.log("SUCCESS response base64 len:", out.length);
-    res.setHeader("content-type", "text/plain");
-    return res.status(200).send(out);
+  // try parse decoded string as JSON
+  let payload;
+  try { payload = JSON.parse(dec); } catch(e){
+    // not JSON? return raw for debugging
+    return res.status(200).json(makeResponse('Failed', 'Decoded not JSON', { raw: dec.slice(0,500) }));
   }
 
-  // If here -> invalid credentials / bad body
-  const failedObj = {
-    Status: "Failed",
-    Message: "Invalid JSON body or credentials",
-    SubscriptionLeft: "0"
+  // --- now implement login logic (clone) ---
+  // expected fields inside payload depend on app; likely has CurrUser / CurrPass or similar
+  const users = loadUsers();
+  // example payload fields: Cliente, CurrUser, CurrPass, CurrToken ...
+  const user = payload.CurrUser || payload.user || payload.username || payload.Cliente;
+  const pass = payload.CurrPass || payload.pass || payload.password;
+
+  if (!user) {
+    return res.status(200).json(makeResponse('Failed', 'No user in payload'));
+  }
+
+  // if user not exists -> create? (clone behaviour: you said "tambah user ke server")
+  if (!users[user]) {
+    // create default account with pass from payload if provided
+    users[user] = { pass: pass || '', created: new Date().toISOString(), vip: false };
+    saveUsers(users);
+  }
+
+  // check password
+  const valid = users[user].pass === (pass||'') || users[user].pass === '' ;
+
+  // sample "already in use" check:
+  if (users[user].inUse) {
+    return res.status(200).json(makeResponse('Failed', 'User already in use!'));
+  }
+
+  if (!valid) {
+    return res.status(200).json(makeResponse('Failed', 'Invalid credentials'));
+  }
+
+  // mark as logged in (simple)
+  users[user].inUse = true;
+  users[user].lastLogin = new Date().toISOString();
+  saveUsers(users);
+
+  // respond with same structure as original server might
+  const successExtra = {
+    CurrUser: user,
+    CurrPass: users[user].pass,
+    CurrToken: 'SAMPLE-TOKEN-' + Math.random().toString(36).slice(2,10),
+    SubscriptionLeft: '30',
+    CurrVersion: '2.0'
   };
-  const outFailed = toBase64(failedObj);
-  console.log("FAILED response base64 len:", outFailed.length);
-  res.setHeader("content-type", "text/plain");
-  return res.status(200).send(outFailed);
-}
+
+  return res.status(200).json(makeResponse('Success', 'Logged in', successExtra));
+      }
