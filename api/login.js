@@ -1,53 +1,67 @@
 import crypto from "crypto";
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "POST only" });
-  }
-
-  const { token } = req.body;
-
-  if (!token) {
-    return res.status(400).json({ error: "token missing" });
-  }
-
-  // 1. Base64 decode token → JSON asli
-  let tokenObj;
+export async function POST(request) {
   try {
-    const decoded = Buffer.from(token, "base64").toString("utf8");
-    tokenObj = JSON.parse(decoded);
-  } catch (e) {
-    return res.status(400).json({ error: "Invalid base64 token" });
+    // Ambil body: token=xxxxxxxxx
+    const raw = await request.text();
+
+    // Format form-urlencoded → ambil setelah "token="
+    const token = raw.startsWith("token=")
+      ? raw.substring(6)
+      : null;
+
+    if (!token) {
+      return new Response("Missing token", { status: 400 });
+    }
+
+    // ---- LOGIC SESUAI APK ----
+
+    // 1. Decode base64 token → dapat JSON
+    const decodedJSON = Buffer.from(token, "base64").toString("utf8");
+
+    // 2. Data random untuk respon
+    const serverData = {
+      Data: generateEncryptedData(),
+      Sign: generateHex(512),
+      Hash: "" // diisi setelah hitung SHA256
+    };
+
+    // 3. Hash = SHA256(data sebelum base64)
+    const plainData = JSON.stringify(serverData.Data);
+    const hashHex = crypto.createHash("sha256").update(plainData).digest("hex");
+
+    serverData.Hash = hashHex;
+
+    // 4. Encode final response JSON → base64 seperti APK
+    const finalPayload = {
+      Data: Buffer.from(JSON.stringify(serverData)).toString("base64"),
+      Sign: generateHex(512),
+      Hash: hashHex
+    };
+
+    return new Response(JSON.stringify(finalPayload), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      }
+    });
+
+  } catch (err) {
+    return new Response("ERR: " + err.message, { status: 500 });
   }
-
-  // Data di dalam token
-  const clientData = tokenObj.Data || "";
-  const clientHash = tokenObj.Hash || "";
-
-  // 2. Generate DATA (analogi fcn.00041400 / string building)
-  const serverText = "Login Success " + Date.now();
-  const encodedData = Buffer.from(serverText, "utf8").toString("base64");
-
-  // 3. Generate HASH (mirip SHA-256 di PDG)
-  const hash = crypto
-    .createHash("sha256")
-    .update(serverText)
-    .digest("hex")
-    .toUpperCase();
-
-  // 4. Generate SIGN (random AES-like / PDG pakai table XOR)
-  const randomSign = crypto.randomBytes(64).toString("hex").toUpperCase();
-
-  // 5. Bentuk JSON response
-  const responseObj = {
-    Data: encodedData,
-    Sign: randomSign,
-    Hash: hash
-  };
-
-  // 6. Encode kembali ke BASE64 seperti apk
-  const finalBase64 = Buffer.from(JSON.stringify(responseObj)).toString("base64");
-
-  // Return persis seperti APK expect (STRING base64!)
-  return res.status(200).send(finalBase64);
 }
+
+// ─── Helper ───────────────────────────────────────
+
+function generateHex(bits = 256) {
+  const bytes = bits / 8;
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+function generateEncryptedData() {
+  const payload = {
+    Data: generateHex(128),
+    HasH: generateHex(128)
+  };
+  return payload;
+                                                                         }
