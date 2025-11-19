@@ -2,66 +2,40 @@ import crypto from "crypto";
 
 export async function POST(request) {
   try {
-    // Ambil body: token=xxxxxxxxx
-    const raw = await request.text();
+    const rawBody = await request.text();
 
-    // Format form-urlencoded → ambil setelah "token="
-    const token = raw.startsWith("token=")
-      ? raw.substring(6)
+    // Parse: token=xxxxx
+    const token = rawBody.startsWith("token=")
+      ? rawBody.substring(6)
       : null;
 
     if (!token) {
       return new Response("Missing token", { status: 400 });
     }
 
-    // ---- LOGIC SESUAI APK ----
+    // Decode token dari APK (untuk parsing saja)
+    const decodedToken = Buffer.from(token, "base64").toString("utf8");
 
-    // 1. Decode base64 token → dapat JSON
-    const decodedJSON = Buffer.from(token, "base64").toString("utf8");
-
-    // 2. Data random untuk respon
-    const serverData = {
-      Data: generateEncryptedData(),
-      Sign: generateHex(512),
-      Hash: "" // diisi setelah hitung SHA256
+    // Buat JSON seperti server aslinya
+    const jsonObject = {
+      Data: crypto.randomBytes(256).toString("base64"),
+      Sign: crypto.randomBytes(128).toString("hex"),
+      Hash: crypto.randomBytes(32).toString("hex")
     };
 
-    // 3. Hash = SHA256(data sebelum base64)
-    const plainData = JSON.stringify(serverData.Data);
-    const hashHex = crypto.createHash("sha256").update(plainData).digest("hex");
+    // Encode JSON menjadi Base64 (format wajib APK)
+    const base64Response = Buffer
+      .from(JSON.stringify(jsonObject))
+      .toString("base64");
 
-    serverData.Hash = hashHex;
-
-    // 4. Encode final response JSON → base64 seperti APK
-    const finalPayload = {
-      Data: Buffer.from(JSON.stringify(serverData)).toString("base64"),
-      Sign: generateHex(512),
-      Hash: hashHex
-    };
-
-    return new Response(JSON.stringify(finalPayload), {
+    return new Response(base64Response, {
       status: 200,
       headers: {
         "Content-Type": "application/x-www-form-urlencoded"
       }
     });
 
-  } catch (err) {
-    return new Response("ERR: " + err.message, { status: 500 });
+  } catch (e) {
+    return new Response("ERR:" + e.message, { status: 500 });
   }
-}
-
-// ─── Helper ───────────────────────────────────────
-
-function generateHex(bits = 256) {
-  const bytes = bits / 8;
-  return crypto.randomBytes(bytes).toString("hex");
-}
-
-function generateEncryptedData() {
-  const payload = {
-    Data: generateHex(128),
-    HasH: generateHex(128)
-  };
-  return payload;
-                                                                         }
+                        }
