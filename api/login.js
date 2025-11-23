@@ -1,58 +1,113 @@
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).send("Method Not Allowed");
-  }
+import { NextRequest, NextResponse } from "next/server"; import crypto from "crypto";
 
-  try {
-    let raw = req.body;
+// ----- PUBLIC RSA KEY (ambil dari auth Android) ----- // NOTE: Ganti dengan public key Anda dalam format PEM const PUBLIC_KEY_PEM = -----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQ...ISI -----END PUBLIC KEY-----;
 
-    // ================================================
-    // 1. FIX: pastikan body selalu string
-    // ================================================
-    if (typeof raw === "object") {
-      // Vercel sering kirim { token: "xxx" }
-      if (raw.token) raw = "token=" + raw.token;
-      else raw = JSON.stringify(raw);
-    } else if (Buffer.isBuffer(raw)) {
-      raw = raw.toString("utf8");
-    } else if (raw == null) {
-      raw = "";
-    }
+// ----- Endpoint Login (POST) ----- export async function POST(req: NextRequest) { try { const body = await req.json();
 
-    // ================================================
-    // 2. Ambil token dari "token=xxxxx"
-    // ================================================
-    let token = "";
-
-    if (raw.startsWith("token=")) {
-      token = raw.substring(6).trim();
-    }
-
-    // ================================================
-    // 3. DATA ASLI (yang kamu kirim sebelumnya)
-    // ================================================
-    const Data =
-      "U21OalExaEZNVWNYQXhwM0lsZ29JMXhrSG1CMFZqRkdJbFZkWkVORldTOG1GUTFrRTBJeGFETUlBMUlIUWw1Y0Z5UmxiU3BGRURaY0xWQllFRnRaSjE0elFsSk5VR1VXR1J0clJDRkNKelJSTmtZclZsME9VQ1ZHR2cwSFNnPT0";
-
-    const Sign =
-      "aVlKVjJQTUdlYU8zbE9QT29wS3BCNmpVR2djSHNyRGltWkVXQU9ONkFQNU0yZktiVTY0cHlxVXQ0RmFZdW5kYXM1VVdoNDJ1bUplNTRFaXEwb1dpWTZUc3ZvMUVYdnh6NWQxWnppUW9COFZsSWhEUHROSDl1Q0ZxSXdcL1pBYW5lUlJSMlhjNDNCRHRJeG14RzFkeFB4K1ZGbnQrVnFNb2x4OW5PMHRvZ3c1UElzQmdIUTZOZXFSV3FNNkdxR1VuYWVlZmoxV0NvSDRzUzB0b0U1RDBNdFdnSDlCQXFQYU1qQ1ltRHJEWVBVc2FPQ1BmaUs3WmUxRTc2bDFBd3Q4dzJkanBFeTVGK3JJdTVDNUlXMmxIbDJ5aWRyYmRcL2xQcExuSGZ2Z1FLMSt2Q1Q1Smc0bUJ5MUprN3VVcHYza0I2S1Z4TTQ5U2liVWdRcWc2eThGTWZYZ1RtQTFcL04xbld4WEthQjlvQStEclQ0SmJ3R2NjVjR6SkptVmV5VEtkVGNOZjlUUTZlK2pCeUpjcDBIM242UFpyRFV6aGkzOUlnakZQcURGc2drUnZkRlYrV095K3QrMStrTDRSZ2RTTHN4TjRyazNFanZqY20rSnFqZ3ZFU1lyWVpPbHBMZlV0blF1QlwvUHlaM2NmMXFpeGdTU0JMTzdlSVBoWkFOTmE3TjJrSEZrS09sZER0OWZnTGNmZUlqN29KSGY0ZXZLZ3c1dytRM0VcL1l1aUhBKzloUG1GZjdHY3dkRDI0NVFOOUhoRHJxaFQ1VDJEbjNYbVJHSjJjbGpqcnFFenEzbkwrRlQxNFhiK2w2YVpRVEYyWDVQWGN1Mm1vZnJnOFFJdkZhbXhPYURqTlZSS0tUV3FqNUU2c1BJMk8xdVwvSExWNjhvOGZrWVdjY0R3bEdRYmM9";
-
-    const Hash =
-      "1A0791D45981C1DF8F2B93B5C287770AA77FF14D4F83760737A9BE00E9C89027D";
-
-    const json = { Data, Sign, Hash };
-
-    // ================================================
-    // 4. Encode ke base64 (APK WAJIB BASE64)
-    // ================================================
-    const encoded = Buffer.from(JSON.stringify(json)).toString("base64");
-
-    // ================================================
-    // 5. Kirim ke APK sebagai text/plain
-    // ================================================
-    res.setHeader("Content-Type", "text/plain");
-    return res.status(200).send(encoded);
-  } catch (e) {
-    return res.status(500).send("SERVER ERROR: " + e.message);
-  }
+const encoded = body.tokserver_hk;
+if (!encoded) {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
 }
+
+let tokenJson;
+try {
+  tokenJson = Buffer.from(encoded, "base64").toString();
+} catch {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+let token;
+try {
+  token = JSON.parse(tokenJson);
+} catch {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+const Dados_hk = token.Dados_hk;
+const Hash_hk = token.Hash_hk;
+const Tok_hk = token.Tok_hk;
+
+if (!Dados_hk || !Hash_hk || !Tok_hk) {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
+if (!PRIVATE_KEY) {
+  return NextResponse.json({ error: "Server misconfiguration." }, { status: 500 });
+}
+
+// 1) Decrypt incoming Dados_hk with server PRIVATE KEY (client encrypted with server PUBLIC key)
+let decrypted;
+try {
+  const buffer = Buffer.from(Dados_hk, "base64");
+  decrypted = crypto.privateDecrypt(
+    {
+      key: PRIVATE_KEY,
+      padding: crypto.constants.RSA_PKCS1_PADDING,
+    },
+    buffer
+  ).toString();
+} catch (e) {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+// 2) Validate hash
+const sha = crypto.createHash("sha256").update(decrypted).digest("hex");
+if (sha !== Hash_hk) {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+let data;
+try {
+  data = JSON.parse(decrypted);
+} catch {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+// Optional: validate data.User_hk, Uid_hk, Ip_hk, Tok_hk here (e.g. check against DB)
+
+// Build response JSON matching Android expectations
+const responseData = {
+  ConnectSt_hk: "HasBeenSucceeded",
+  Username: data.User_hk || "",
+  Logged_UserHK: data.User_hk || "",
+  Logged_TokHK: Tok_hk,
+  MessageFromSv: "Login Successful"
+};
+
+const responseString = JSON.stringify(responseData);
+
+// 3) Encrypt responseString with PRIVATE KEY so client (with PUBLIC KEY) can "decrypt"
+let encryptedResponse;
+try {
+  encryptedResponse = crypto.privateEncrypt(
+    {
+      key: PRIVATE_KEY,
+      padding: crypto.constants.RSA_PKCS1_PADDING,
+    },
+    Buffer.from(responseString)
+  ).toString("base64");
+} catch (e) {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+const responseHash = crypto.createHash("sha256").update(responseString).digest("hex");
+
+// 4) Sign responseString with PRIVATE KEY (server signature)
+let signature;
+try {
+  signature = crypto.createSign("RSA-SHA256").update(responseString).sign(PRIVATE_KEY, "base64");
+} catch (e) {
+  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+}
+
+return NextResponse.json(
+  {
+    Dados_hk: encryptedResponse,
+    Hash_hk: responseHash,
+    Sign_hk: signature
+  },
+  { status: 200 }
+);
+
+} catch (err) { return NextResponse.json({ error: "Key está inválida." }, { status: 400 }); } }
