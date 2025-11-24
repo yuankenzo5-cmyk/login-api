@@ -1,113 +1,121 @@
-import { NextRequest, NextResponse } from "next/server"; import crypto from "crypto";
+// api/login.js
+import crypto from "crypto";
 
-// ----- PUBLIC RSA KEY (ambil dari auth Android) ----- // NOTE: Ganti dengan public key Anda dalam format PEM const PUBLIC_KEY_PEM = -----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQ...ISI -----END PUBLIC KEY-----;
+/**
+ * Environment variables (set di Vercel):
+ * - SIGN_SECRET  (string)  -> secret for HMAC signing (choose a strong one)
+ * - ALLOWED_USER (opt)     -> example
+ * - ALLOWED_PASS (opt)
+ */
+const SIGN_SECRET = process.env.SIGN_SECRET || "replace_sign_secret";
 
-// ----- Endpoint Login (POST) ----- export async function POST(req: NextRequest) { try { const body = await req.json();
-
-const encoded = body.tokserver_hk;
-if (!encoded) {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+/** helper: parse urlencoded raw body */
+async function parseUrlEncoded(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  const params = new URLSearchParams(raw);
+  const out = {};
+  for (const [k, v] of params.entries()) out[k] = v;
+  return out;
 }
 
-let tokenJson;
-try {
-  tokenJson = Buffer.from(encoded, "base64").toString();
-} catch {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+/** helper: sha256 hex */
+function sha256hex(strOrBuf) {
+  return crypto.createHash("sha256").update(strOrBuf).digest("hex").toUpperCase();
 }
 
-let token;
-try {
-  token = JSON.parse(tokenJson);
-} catch {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+/** helper: sign HMAC-SHA256 and return base64 */
+function signBase64(dadosBase64) {
+  return crypto.createHmac("sha256", SIGN_SECRET).update(dadosBase64).digest("base64");
 }
 
-const Dados_hk = token.Dados_hk;
-const Hash_hk = token.Hash_hk;
-const Tok_hk = token.Tok_hk;
-
-if (!Dados_hk || !Hash_hk || !Tok_hk) {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
+/** Build Dados_hk: base64(JSONplain) */
+function buildDados(obj) {
+  const json = JSON.stringify(obj);
+  return Buffer.from(json, "utf8").toString("base64");
 }
 
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
-if (!PRIVATE_KEY) {
-  return NextResponse.json({ error: "Server misconfiguration." }, { status: 500 });
-}
+export default async function handler(req, res) {
+  try {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return res.status(405).send("Method Not Allowed");
+    }
 
-// 1) Decrypt incoming Dados_hk with server PRIVATE KEY (client encrypted with server PUBLIC key)
-let decrypted;
-try {
-  const buffer = Buffer.from(Dados_hk, "base64");
-  decrypted = crypto.privateDecrypt(
-    {
-      key: PRIVATE_KEY,
-      padding: crypto.constants.RSA_PKCS1_PADDING,
-    },
-    buffer
-  ).toString();
-} catch (e) {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
-}
+    const body = await parseUrlEncoded(req);
+    const tok = body.tokserver_hk || body.tokServer_hk || body.tok;
 
-// 2) Validate hash
-const sha = crypto.createHash("sha256").update(decrypted).digest("hex");
-if (sha !== Hash_hk) {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
-}
+    if (!tok) {
+      // APK expects something base64 even on error; return base64 of simple failed JSON
+      const failDados = buildDados({ ConnectSt_hk: "Failed", MessageFromSv: "User Invalido" });
+      const failHash = sha256hex(failDados);
+      const failSign = signBase64(failDados);
+      return res.status(200).json({
+        Dados_hk: failDados,
+        Sign_hk: failSign,
+        Hash_hk: failHash
+      });
+    }
 
-let data;
-try {
-  data = JSON.parse(decrypted);
-} catch {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
-}
+    // tok is base64 string -> decode to JSON (pack)
+    let pack;
+    try {
+      const decoded = Buffer.from(tok, "base64").toString("utf8");
+      pack = JSON.parse(decoded);
+    } catch (e) {
+      // If parsing fails, return encrypted FAILED response (so APK won't show UNKNOWN)
+      const failDados = buildDados({ ConnectSt_hk: "Failed", MessageFromSv: "User Invalido" });
+      const failHash = sha256hex(failDados);
+      const failSign = signBase64(failDados);
+      return res.status(200).json({
+        Dados_hk: failDados,
+        Sign_hk: failSign,
+        Hash_hk: failHash
+      });
+    }
 
-// Optional: validate data.User_hk, Uid_hk, Ip_hk, Tok_hk here (e.g. check against DB)
+    // At this point we have pack, likely contains Dados_hk (ciphertext), Tok_hk, Hash_hk, etc.
+    // Your app expects server to decrypt/process pack.Dados_hk and then reply.
+    // For a simple compatible approach: we will NOT try to decrypt pack.Dados_hk here.
+    // Instead, create the "decrypted response JSON" that the APK expects (adjust fields).
+    //
+    // Example decrypted JSON (must match app expectation EXACT keys):
+    const usernameFromRequest = (pack?.username || pack?.user || "unknown");
+    const decryptedResponse = {
+      ConnectSt_hk: "HasBeenSucceeded",
+      MessageFromSv: "Login OK",
+      Logged_UserHK: usernameFromRequest,
+      Logged_TokHK: (pack?.Tok_hk || pack?.tok || "TOK-FAKE-1234"),
+      Username: usernameFromRequest
+    };
 
-// Build response JSON matching Android expectations
-const responseData = {
-  ConnectSt_hk: "HasBeenSucceeded",
-  Username: data.User_hk || "",
-  Logged_UserHK: data.User_hk || "",
-  Logged_TokHK: Tok_hk,
-  MessageFromSv: "Login Successful"
-};
+    // Build Dados_hk (base64 of decryptedResponse JSON)
+    const dadosBase64 = buildDados(decryptedResponse);
 
-const responseString = JSON.stringify(responseData);
+    // Hash_hk = SHA256 hex of dadosBase64 (uppercase to match sample)
+    const hashhk = sha256hex(dadosBase64);
 
-// 3) Encrypt responseString with PRIVATE KEY so client (with PUBLIC KEY) can "decrypt"
-let encryptedResponse;
-try {
-  encryptedResponse = crypto.privateEncrypt(
-    {
-      key: PRIVATE_KEY,
-      padding: crypto.constants.RSA_PKCS1_PADDING,
-    },
-    Buffer.from(responseString)
-  ).toString("base64");
-} catch (e) {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
-}
+    // Sign_hk = HMAC-SHA256(dadosBase64, SIGN_SECRET) base64
+    const signhk = signBase64(dadosBase64);
 
-const responseHash = crypto.createHash("sha256").update(responseString).digest("hex");
+    // Return exactly the fields APK expects
+    return res.status(200).json({
+      Dados_hk: dadosBase64,
+      Sign_hk: signhk,
+      Hash_hk: hashhk
+    });
 
-// 4) Sign responseString with PRIVATE KEY (server signature)
-let signature;
-try {
-  signature = crypto.createSign("RSA-SHA256").update(responseString).sign(PRIVATE_KEY, "base64");
-} catch (e) {
-  return NextResponse.json({ error: "Key está inválida." }, { status: 400 });
-}
-
-return NextResponse.json(
-  {
-    Dados_hk: encryptedResponse,
-    Hash_hk: responseHash,
-    Sign_hk: signature
-  },
-  { status: 200 }
-);
-
-} catch (err) { return NextResponse.json({ error: "Key está inválida." }, { status: 400 }); } }
+  } catch (err) {
+    console.error("login handler error:", err);
+    // respond failed (base64 JSON)
+    const failDados = buildDados({ ConnectSt_hk: "Failed", MessageFromSv: "User Invalido" });
+    const failHash = sha256hex(failDados);
+    const failSign = signBase64(failDados);
+    return res.status(200).json({
+      Dados_hk: failDados,
+      Sign_hk: failSign,
+      Hash_hk: failHash
+    });
+  }
+    }
