@@ -1,45 +1,44 @@
-export default async function handler(req, res) {
-  let raw = "";
-  req.on("data", chunk => raw += chunk.toString());
-  await new Promise(r => req.on("end", r));
+import qs from "querystring";
 
-  const params = {};
-  raw.split("&").forEach(p => {
-    let [k, v] = p.split("=");
-    params[k] = decodeURIComponent((v || "").replace(/\+/g, " "));
-  });
+export default function handler(req, res) {
+    if (req.method !== "POST") {
+        return res.status(405).json({ MessageFromSv: "Método inválido" });
+    }
 
-  const key = params.key || params.tokserver_hk || "";
+    let body = "";
+    req.on("data", chunk => body += chunk);
+    req.on("end", () => {
+        const parsed = qs.parse(body);
+        const encoded = parsed.tokserver_hk;
 
-  // cek login (sesuaikan key yg kamu mau)
-  const ok = key === "jslbbs";
+        if (!encoded) {
+            return res.status(400).json({ MessageFromSv: "Insira seus dados" });
+        }
 
-  // inner json
-  let inner;
-  if (ok) {
-    inner = {
-      ConnectSt_hk: "HasBeenSucceeded",
-      MessageFromSv: "Login OK",
-      Logged_UserHK: "user001",
-      Logged_TokHK: "token001"
-    };
-  } else {
-    inner = {
-      ConnectSt_hk: "Failed",
-      MessageFromSv: "Dados Incorretos"
-    };
-  }
+        let data;
+        try {
+            data = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+        } catch (e) {
+            return res.status(400).json({ MessageFromSv: "Erro no formato" });
+        }
 
-  const Dados_hk = Buffer.from(JSON.stringify(inner), "utf8").toString("base64");
+        const key = data.key || data.Key || data.password;
 
-  const outer = {
-    Dados_hk: Dados_hk,
-    Sign_hk: "OKSIGN",
-    Hash_hk: "OKHASH"
-  };
+        // Sesuaikan dengan key benar
+        const validKey = "123456";
 
-  const finalBody = Buffer.from(JSON.stringify(outer), "utf8").toString("base64");
+        if (key !== validKey) {
+            return res.status(200).json({
+                MessageFromSv: "Dados Incorretos"
+            });
+        }
 
-  res.setHeader("Content-Type", "text/plain");
-  res.status(200).send(finalBody);
+        // Jika benar
+        return res.status(200).json({
+            Dados_hk: "DADOS_ENCRYPT_RESULT",
+            Hash_hk: "HASH_RESULT",
+            Sign_hk: "SIGN_RESULT",
+            MessageFromSv: "Login efetuado com sucesso"
+        });
+    });
 }
