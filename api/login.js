@@ -1,117 +1,84 @@
+// api/login.js
 import crypto from "crypto";
 
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '1mb',
-      extended: true,
-    },
-  },
-};
+export const config = { api: { bodyParser: false } };
 
-const SIGN_SECRET = process.env.SIGN_SECRET || "secret123";
-const XOR_KEY_HEX = process.env.XOR_KEY_HEX || "";
-const ACCEPT_ANY = process.env.ACCEPT_ANY === "1";
+// CONFIG via ENV
+const SIGN_SECRET = process.env.SIGN_SECRET || "change_this_secret";
+const ACCEPT_KEY = process.env.ACCEPT_KEY || "yanz"; // default key that will be accepted
+const ACCEPT_ANY = process.env.ACCEPT_ANY === "1"; // if set, accept any key
+const DEBUG = process.env.DEBUG === "1";
+
+function readRawBody(req) {
+  return new Promise((resolve) => {
+    let acc = "";
+    req.on("data", c => acc += c.toString());
+    req.on("end", () => resolve(acc));
+    req.on("error", () => resolve(""));
+  });
+}
+
+function parseUrlEncoded(raw) {
+  if (!raw) return {};
+  return Object.fromEntries(raw.split("&").map(pair => {
+    const [k = "", v = ""] = pair.split("=");
+    try {
+      return [decodeURIComponent(k), decodeURIComponent(v.replace(/\+/g," "))];
+    } catch (e) {
+      return [k, v];
+    }
+  }));
+}
 
 function sha256HexUpper(x) {
   return crypto.createHash("sha256").update(x).digest("hex").toUpperCase();
 }
 
-function hmacBase64(x) {
-  return crypto.createHmac("sha256", SIGN_SECRET).update(x).digest("base64");
+function hmacBase64(secret, x) {
+  return crypto.createHmac("sha256", secret).update(x).digest("base64");
 }
 
-function xorDecrypt(buf, keyBuf) {
-  const out = Buffer.alloc(buf.length);
-  const k = keyBuf.length;
-  for (let i = 0; i < buf.length; i++) out[i] = buf[i] ^ keyBuf[i % k];
-  return out;
-}
-
-export default function handler(req, res) {
+export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
       return res.status(405).send("Method Not Allowed");
     }
 
-    const params = req.body; // VERCEL AUTO-PARSE
-    const tok = params.tokserver_hk;
+    const raw = await readRawBody(req);
+    const params = parseUrlEncoded(raw);
+    const key = params.key || params.tokserver_hk || params.tok || params.token || "";
 
-    if (!tok) {
-      const fail = {
-        ConnectSt_hk: "Failed",
-        MessageFromSv: "User Invalido"
-      };
-      const dados = Buffer.from(JSON.stringify(fail)).toString("base64");
-      const out = {
-        Dados_hk: dados,
-        Sign_hk: hmacBase64(dados),
-        Hash_hk: sha256HexUpper(dados)
-      };
-      return res.status(200).send(Buffer.from(JSON.stringify(out)).toString("base64"));
-    }
+    if (DEBUG) console.log("raw:", raw, "params:", params);
 
-    let decodedPack;
-    try {
-      decodedPack = JSON.parse(Buffer.from(tok, "base64").toString("utf8"));
-    } catch (e) {
-      decodedPack = null;
-    }
+    // Check key
+    const ok = ACCEPT_ANY || (key && key === ACCEPT_KEY);
 
-    let username = null;
-    let password = null;
-    let tok_hk = null;
+    // Build inner response depending on success
+    const inner = ok
+      ? { ConnectSt_hk: "HasBeenSucceeded", MessageFromSv: "Login OK", Logged_UserHK: "user123", Logged_TokHK: "tok_fake_abc" }
+      : { ConnectSt_hk: "Failed", MessageFromSv: "Dados Incorretos" };
 
-    if (decodedPack) {
-      tok_hk = decodedPack.Tok_hk;
+    const dadosBase64 = Buffer.from(JSON.stringify(inner), "utf8").toString("base64");
+    const hash = sha256HexUpper(dadosBase64);
+    const sign = hmacBase64(SIGN_SECRET, dadosBase64);
 
-      if (decodedPack.Dados_hk) {
-        const raw = Buffer.from(decodedPack.Dados_hk, "base64");
+    const outer = { Dados_hk: dadosBase64, Sign_hk: sign, Hash_hk: hash };
+    const outerBase64 = Buffer.from(JSON.stringify(outer), "utf8").toString("base64");
 
-        if (XOR_KEY_HEX) {
-          try {
-            const key = Buffer.from(XOR_KEY_HEX, "hex");
-            const plain = xorDecrypt(raw, key).toString("utf8");
-            const obj = JSON.parse(plain);
-            username = obj.username;
-            password = obj.password;
-          } catch (e) {}
-        }
-      }
-    }
-
-    let ok = false;
-    if (ACCEPT_ANY) ok = true;
-    if (tok_hk) ok = true;
-
-    let responseInner;
-
-    if (ok) {
-      responseInner = {
-        ConnectSt_hk: "HasBeenSucceeded",
-        MessageFromSv: "Login OK",
-        Logged_UserHK: username || "unknown",
-        Logged_TokHK: tok_hk || "FAKE-TOKEN"
-      };
-    } else {
-      responseInner = {
-        ConnectSt_hk: "Failed",
-        MessageFromSv: "User Invalido"
-      };
-    }
-
-    const dados = Buffer.from(JSON.stringify(responseInner)).toString("base64");
-    const out = {
-      Dados_hk: dados,
-      Sign_hk: hmacBase64(dados),
-      Hash_hk: sha256HexUpper(dados)
-    };
-
-    const finalBase64 = Buffer.from(JSON.stringify(out)).toString("base64");
-
-    return res.status(200).send(finalBase64);
+    // Return as plain text (APK expects plain base64 body)
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    return res.status(200).send(outerBase64);
 
   } catch (err) {
-    return res.status(500).send("internal error");
+    console.error("login error", err);
+    const failInner = { ConnectSt_hk: "Failed", MessageFromSv: "User Invalido" };
+    const dadosBase64 = Buffer.from(JSON.stringify(failInner), "utf8").toString("base64");
+    const hash = sha256HexUpper(dadosBase64);
+    const sign = hmacBase64(SIGN_SECRET, dadosBase64);
+    const outer = { Dados_hk: dadosBase64, Sign_hk: sign, Hash_hk: hash };
+    const outerBase64 = Buffer.from(JSON.stringify(outer), "utf8").toString("base64");
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    return res.status(200).send(outerBase64);
   }
-    }
+                                        }
