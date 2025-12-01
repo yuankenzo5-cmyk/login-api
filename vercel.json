@@ -2,14 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/login.js",
+      "src": "api/checkfile.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
-      "src": "/api/login",
-      "dest": "api/login.js"
+      "src": "/api/checkfile.php",
+      "dest": "api/checkfile.js"
     },
     {
       "src": "/loader.zip",
